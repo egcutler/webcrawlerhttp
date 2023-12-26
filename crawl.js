@@ -1,71 +1,93 @@
 const { JSDOM } = require('jsdom')
 
-async function crawlPage(currentURL){
-      console.log(`actively crawling ${currentURL}...`)
-      try {
-            const resp = await fetch(currentURL)
+async function crawlPage(baseURL, currentURL, pages){
+  // if this is an offsite URL, bail immediately
+  const currentUrlObj = new URL(currentURL)
+  const baseUrlObj = new URL(baseURL)
+  if (currentUrlObj.hostname !== baseUrlObj.hostname){
+    return pages
+  }
+  
+  const normalizedURL = normalizeURL(currentURL)
 
-            if (resp.status > 399){
-                  console.log('--------------------------------')
-                  console.log(`Error in fetch with status code: ${resp.status} on page ${currentURL}`)
-                  console.log('--------------------------------')
-                  return
-            }
+  // if we've already visited this page
+  // just increase the count and don't repeat
+  // the http request
+  if (pages[normalizedURL] > 0){
+    pages[normalizedURL]++
+    return pages
+  }
 
-            const contentType = resp.headers.get('Content-Type')
-            if (!contentType.includes('text/html')){
-                  console.log('--------------------------------')
-                  console.log(`non html response, content type: ${contentType} on page ${currentURL}`)
-                  console.log('--------------------------------')
-                  return
-            }
+  // initialize this page in the map
+  // since it doesn't exist yet
+  pages[normalizedURL] = 1
 
-            console.log(await resp.text())
-      } catch (err){
-            console.log('--------------------------------')
-            console.log(`Error in fetch: ${err.message}, on page ${currentURL}`)
-            console.log('--------------------------------')
-      }
+  // fetch and parse the html of the currentURL
+  console.log(`crawling ${currentURL}`)
+  let htmlBody = ''
+  try {
+    const resp = await fetch(currentURL)
+    if (resp.status > 399){
+      console.log('--------------------------------')
+      console.log(`Error in fetch with status code: ${resp.status} on page ${currentURL}`)
+      console.log('--------------------------------')
+      return pages
+    }
+    const contentType = resp.headers.get('content-type')
+    if (!contentType.includes('text/html')){
+      console.log('--------------------------------')
+      console.log(`non html response, content type: ${contentType} on page ${currentURL}`)
+      console.log('--------------------------------')
+      return pages
+    }
+    htmlBody = await resp.text()
+  } catch (err){
+      console.log('--------------------------------')
+      console.log(`Error in fetch: ${err.message}, on page ${currentURL}`)
+      console.log('--------------------------------')
+  }
 
+  const nextURLs = getURLsFromHTML(htmlBody, baseURL)
+  for (const nextURL of nextURLs){
+    pages = await crawlPage(baseURL, nextURL, pages)
+  }
+
+  return pages
 }
 
 function getURLsFromHTML(htmlBody, baseURL){
-      const urls = []
-      const dom = new JSDOM(htmlBody)
-      const linkElements = dom.window.document.querySelectorAll('a')
-      for (const linkElement of linkElements){
-            if (linkElement.href.slice(0,1) === '/'){
-                  // relative url
-                  try {
-                        const urlObj = new URL(`${baseURL}${linkElement.href}`)
-                        urls.push(urlObj.href)   
-                  } catch (err){
-                        console.log(`Error with relative url: ${err.message}`)
-                  }
-            } else {
-                  // absolute url
-                  try {
-                        const urlObj = new URL(linkElement.href)
-                        urls.push(urlObj.href)   
-                  } catch (err){
-                        console.log(`Error with absolute url: ${err.message}`)
-                  }
-            }
+  const urls = []
+  const dom = new JSDOM(htmlBody)
+  const aElements = dom.window.document.querySelectorAll('a')
+  for (const aElement of aElements){
+    if (aElement.href.slice(0,1) === '/'){
+      try {
+        urls.push(new URL(aElement.href, baseURL).href)
+      } catch (err){
+        console.log(`${err.message}: ${aElement.href}`)
       }
-      return urls
+    } else {
+      try {
+        urls.push(new URL(aElement.href).href)
+      } catch (err){
+        console.log(`${err.message}: ${aElement.href}`)
+      }
+    }
+  }
+  return urls
 }
 
-function normalizeURL(urlString){
-      const urlObj = new URL(urlString)
-      const hostPath = `${urlObj.hostname}${urlObj.pathname}`
-      if (hostPath.length > 0 && hostPath.slice(-1) === '/') {
-            return hostPath.slice(0, -1)
-      }
-      return hostPath
+function normalizeURL(url){
+  const urlObj = new URL(url)
+  let fullPath = `${urlObj.host}${urlObj.pathname}`
+  if (fullPath.length > 0 && fullPath.slice(-1) === '/'){
+    fullPath = fullPath.slice(0, -1)
+  }
+  return fullPath
 }
 
 module.exports = {
-      normalizeURL,
-      getURLsFromHTML,
-      crawlPage
+  crawlPage,
+  normalizeURL,
+  getURLsFromHTML
 }
