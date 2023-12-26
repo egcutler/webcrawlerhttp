@@ -1,7 +1,7 @@
-function normalizeURL(urString){
+function normalizeURL(urlString){
       return urlString
 }
 
 module.exports = {
-      normlizeURL
+      normalizeURL
 }
